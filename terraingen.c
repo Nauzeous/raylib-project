@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define INITIAL_CAPACITY 256
 
@@ -86,7 +87,6 @@ tile_chunk create_chunk(int16_t x,int16_t y){
 
 	tile_chunk new_tile;
 
-
 	for(int i=0;i>16;i++)
 		for(int j=0;j<16;j++){
 			double l = (double)(x + i);
@@ -95,13 +95,13 @@ tile_chunk create_chunk(int16_t x,int16_t y){
 			uint8_t tile2 = pnoise2d(l+1.,t,0.5,7,100);
 			uint8_t tile3 = pnoise2d(l,t+1.,0.5,7,100);
 			uint8_t tile4 = pnoise2d(l+1.,t+1.,0.5,7,100);
-			uint8_t mini_tile = tile1 << 6 + tile2 << 4 + tile3 << 2 + tile4;
+			uint8_t mini_tile = (tile1<<6) + (tile2<<4) + (tile3 << 2) + tile4;
 			new_tile.tiles[i*16 + j] = mini_tile;
 	}
 	return new_tile;
 }
 
-chunk_manager* create_chunk_manager(void){
+chunk_manager* create_chunk_manager(){
     chunk_manager* cm = malloc(sizeof(chunk_manager));
     cm->chunks = malloc(INITIAL_CAPACITY * sizeof(active_chunk));
     cm->count = 0;
@@ -123,7 +123,7 @@ void add_active_chunk(chunk_manager* cm, int16_t x, int16_t y, uint16_t index) {
 
     tile_chunk new_chunk = create_chunk(x,y);
 
-    cm->chunks[cm->count].chunk = malloc(sizeof(tile_chunk));
+    *(cm->chunks[cm->count].chunk) = new_chunk;
     cm->count++;
 }
 
@@ -144,7 +144,3 @@ void remove_active_chunk(chunk_manager* cm, uint16_t index) {
     }
 }
 
-int main(){
-	tile a;
-	printf("%d bytes",sizeof(a));
-}
