@@ -3,144 +3,190 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define INITIAL_CAPACITY 256
-
-double rawnoise(int n) {
-    n = (n << 13) ^ n;
-    return (1.0 - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0);
+void rotate2D(double* x, double* y, float angle){
+    float c = cos(angle);
+    float s = sin(angle);
+    double tx = c * (*x) - s * (*y);
+    double ty = s * (*x) + c * (*y);
+    *x = tx;
+    *y = ty;
 }
 
-double interpolate(double a, double b, double x) {
-    double f = (1 - cos(x * 3.141593)) * 0.5;
-    return a * (1 - f) + b * f;
+float fract(float n){
+    return n - (float)(int)n;
 }
 
-
-double noise2d(int x, int y, int octave, int seed) {
-    return rawnoise(x * 1619 + y * 31337 + octave * 3463 + seed * 13397);
-}
-
-
-double smooth2d(double x, double y, int octave, int seed) {
-    int intx = (int)x;
-    double fracx = x - intx;
-    int inty = (int)y;
-    double fracy = y - inty;
+float hash1(float px, float py ){
+    px = 50.*fract( px*0.3183099 );
+    py = 50.*fract( py*0.3183099 );
     
-    double v1 = noise2d(intx, inty, octave, seed);
-    double v2 = noise2d(intx + 1, inty, octave, seed);
-    double v3 = noise2d(intx, inty + 1, octave, seed);
-    double v4 = noise2d(intx + 1, inty + 1, octave, seed);
-    
-    double i1 = interpolate(v1, v2, fracx);
-    double i2 = interpolate(v3, v4, fracx);
-    
-    return interpolate(i1, i2, fracy);
+    return fract(px*py*(px+py));
 }
 
 
-double pnoise2d(double x, double y, double persistence, int octaves, int seed) {
-   double total = 0.0;
+float noise(float x, float y ){
+    x/=10.0f;
+    y/=10.0f;
+    float px = floor(x);
+    float py = floor(y);
+    float wx = fract(x);
+    float wy = fract(y);
+    float ux = wx*wx*wx*(wx*(wx*6.0-15.0)+10.0);
+    float uy = wy*wy*wy*(wy*(wy*6.0-15.0)+10.0);
+    float a = hash1(px,py);
+    float b = hash1(px+1.0,py);
+    float c = hash1(px,py+1.0);
+    float d = hash1(px+1.0,py+1.0);
+    return (a + (b-a)*ux + (c-a)*uy + (a - b - c + d)*ux*uy)-.5;
+}
+
+
+uint8_t pnoise2d(double x, double y, double persistence, int octaves, int seed) {
+   float tiles[4] = {0.,0.,0.,0.};
    double frequency = 1.0;
    double amplitude = 1.0;
    int i = 0;
+   uint8_t pack=0;
+
    
-   for(i = 0; i < octaves; i++) {
-       total += smooth2d(x * frequency, y * frequency, i, seed) * amplitude;
-       frequency /= 2;
+    for(i = 0; i < octaves; i++) {
+       double yfreq = y*frequency;
+
+       tiles[0] += noise( x    * frequency, yfreq) * amplitude;
+       tiles[1] += noise((x+1) * frequency, yfreq) * amplitude;
+       tiles[2] += noise((x+2) * frequency, yfreq) * amplitude;
+       tiles[3] += noise((x+3) * frequency, yfreq) * amplitude;
+       frequency *= 2;
        amplitude *= persistence;
-   } 
-   printf("%f",total);
-   if(total > 0.5)return 3;
-   else if(total>0.2)return 2;
-   else if(total>0.1)return 1;
-   else return 0;
+    }
+    for(i=0;i<4;i++)pack|=(tiles[i]>0.4?3:(tiles[i]>-0.2?2:(tiles[i]>-0.3)?1:0))<<(6-2*i);
+    return pack;
+
 }
 
-
-
-typedef enum __attribute__((packed)) {
-    WATER,  // 0
-    BEACH,  // 1
-    GRASS,  // 2
-    ROCK    // 3
-} tile;
+typedef struct{
+    int16_t x;
+    int16_t y;
+    int health;
+} Player;
 
 typedef struct {
     uint8_t tiles[64]; // 16x16
-} tile_chunk;
+} Tile_chunk;
+
 
 typedef struct {
-    tile_chunk* chunk;
-    int16_t x;
-    int16_t y;
-    uint16_t index;  
-} active_chunk;
+    Tile_chunk** chunks;     // 13x13 -6 to 6
+    int16_t width;          // Width of the chunk grid
+    int16_t height;         // Height of the chunk grid
+} Chunk_manager;
 
-typedef struct {
-    active_chunk* chunks;     // Dynamically allocated array
-    size_t count;            // Current number of active chunks
-    size_t capacity;         // Allocated capacity
-} chunk_manager;
 
-tile_chunk create_chunk(int16_t x,int16_t y){
+Tile_chunk create_chunk(int16_t x,int16_t y){
 
-	tile_chunk new_tile;
-
-	for(int i=0;i>16;i++)
-		for(int j=0;j<16;j++){
-			double l = (double)(x + i);
-			double t = (double)(y + j);
-			uint8_t tile1 = pnoise2d(l,t,0.5,7,100);
-			uint8_t tile2 = pnoise2d(l+1.,t,0.5,7,100);
-			uint8_t tile3 = pnoise2d(l,t+1.,0.5,7,100);
-			uint8_t tile4 = pnoise2d(l+1.,t+1.,0.5,7,100);
-			uint8_t mini_tile = (tile1<<6) + (tile2<<4) + (tile3 << 2) + tile4;
-			new_tile.tiles[i*16 + j] = mini_tile;
-	}
-	return new_tile;
+    Tile_chunk new_tile;
+    int a=0;
+    for(int i=0;i<16;i++)
+        for(int j=0;j<4;j++){
+            double l = (double)(x + j*4);
+            double t = (double)(y + i);
+            new_tile.tiles[a++] = pnoise2d(l,t,0.5,8,8);
+    }
+    return new_tile;
 }
 
-chunk_manager* create_chunk_manager(){
-    chunk_manager* cm = malloc(sizeof(chunk_manager));
-    cm->chunks = malloc(INITIAL_CAPACITY * sizeof(active_chunk));
-    cm->count = 0;
-    cm->capacity = INITIAL_CAPACITY;
+
+
+Chunk_manager* create_chunk_manager(int16_t width, int16_t height) {
+    Chunk_manager* cm = malloc(sizeof(Chunk_manager));
+    cm->width = width;
+    cm->height = height;
+    
+    // Allocate array of pointers
+    cm->chunks = (Tile_chunk**)malloc(height * sizeof(Tile_chunk*));
+    for(int i = 0; i < height; i++) {
+        // Allocate each row
+        cm->chunks[i] = (Tile_chunk*)malloc(width * sizeof(Tile_chunk));
+    }
     return cm;
 }
 
-void add_active_chunk(chunk_manager* cm, int16_t x, int16_t y, uint16_t index) {
-    // Grow array if needed
-    if (cm->count == cm->capacity) {
-        cm->capacity *= 2;
-        cm->chunks = realloc(cm->chunks, cm->capacity * sizeof(active_chunk));
+
+void add_chunk(Chunk_manager* cm, int16_t x, int16_t y) {
+    // Check if position is within bounds
+    if(x < 0 || x >= cm->width || y < 0 || y >= cm->height) {
+        return;
     }
-    
-    // Add new chunk
-    cm->chunks[cm->count].x = x;
-    cm->chunks[cm->count].y = y;
-    cm->chunks[cm->count].index = index;
-
-    tile_chunk new_chunk = create_chunk(x,y);
-
-    *(cm->chunks[cm->count].chunk) = new_chunk;
-    cm->count++;
+    cm->chunks[y][x] = create_chunk(x*16,y*16);
 }
 
-void remove_active_chunk(chunk_manager* cm, uint16_t index) {
-    // Free the chunk at the known index
-    free(cm->chunks[index].chunk);
-    
-    // Shift all chunks after this index back by one
-    for (size_t i = index; i < cm->count - 1; i++) {
-        cm->chunks[i] = cm->chunks[i + 1];
+void scroll_right(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
+    for(int x = cm->width - 1; x > 0; x--) {
+        for(int y = 0; y < cm->height; y++) {
+            cm->chunks[x][y] = cm->chunks[x - 1][y];
+        }
     }
-    cm->count--;
-    
-    // shrink array if too small
-    if (cm->count < cm->capacity / 4 && cm->capacity > INITIAL_CAPACITY) {
-        cm->capacity /= 2;
-        cm->chunks = realloc(cm->chunks, cm->capacity * sizeof(active_chunk));
+    int16_t top = player->y & 0xfff0 - 6*16;
+    int16_t left = player->x & 0xfff0 - 6*16;
+    for(int y = 0;y<cm->height;y++){
+        cm->chunks[cm->width -1][y] = create_chunk(left,top + 16*y);
     }
 }
 
+void scroll_left(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
+    for(int x = 1; x<cm->width;x++) {
+        for(int y = 0; y<cm->height;y++) {
+            cm->chunks[x-1][y] = cm->chunks[x][y];
+        }
+    }
+    int16_t top = player->y & 0xfff0 - 6*16;
+    int16_t left = player->x & 0xfff0 + 6*16;
+    for(int y = 0;y<cm->height;y++){
+        cm->chunks[0][y] = create_chunk(left,top + 16*y);
+    }
+}
+
+void scroll_up(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
+    for(int x = 0; x<cm->width;x++) {
+        for(int y = 0; y<cm->height-1;y++) {
+            cm->chunks[x][y] = cm->chunks[x][y+1];
+        }
+    }
+    int16_t top = player->y & 0xfff0 + 6*16;
+    int16_t left = player->x & 0xfff0 - 6*16;
+    for(int x = 0;x<cm->width;x++){
+        cm->chunks[x][cm->height -1] = create_chunk(left+16*x,top);
+    }
+}
+
+void scroll_down(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
+    for(int x = 0; x<cm->width;x++) {
+        for(int y = 1; y<cm->height;y++) {
+            cm->chunks[x][y-1] = cm->chunks[x][y];
+        }
+    }
+
+    int16_t top = player->y & 0xfff0 - 6*16;
+    int16_t left = player->x & 0xfff0 - 6*16;
+    for(int x = 0;x<cm->width;x++){
+        cm->chunks[x][0] = create_chunk(left+16*x,top);
+    }
+}
+
+
+void init_chunks(Chunk_manager* cm){
+    for(int i=0;i<cm->height;i++){
+        for(int j=0;j<cm->width;j++){
+            add_chunk(cm,j,i);
+        }
+    }
+}
+
+void free_chunk_manager(Chunk_manager* cm) {
+    for(int i = 0; i < cm->height; i++) {
+        free(cm->chunks[i]);
+    }
+    free(cm->chunks);
+    cm->width = 0;
+    cm->height = 0;
+}
