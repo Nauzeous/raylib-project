@@ -1,8 +1,8 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g
+CFLAGS = -Wall -Wextra -O3
 
 # Libraries
-LIBS = -lm -lraylib
+LIBS = -lm -lraylib 
 
 # Source files (add more .c files here if you have them)
 SRCS = main.c
