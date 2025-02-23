@@ -3,62 +3,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "raylib.h"
-
-float fract(float n){
-    return n - (float)(int)n;
-}
-
-float hash1(float px, float py ){
-    px = 50.*fract( px*0.3183099 );
-    py = 50.*fract( py*0.3183099 );
-    
-    return fract(px*py*(px+py));
-}
-
-
-float noise(float x, float y ){
-    x/=50.0f;
-    y/=50.0f;
-    float px = floor(x);
-    float py = floor(y);
-    float wx = fract(x);
-    float wy = fract(y);
-    float ux = wx*wx*wx*(wx*(wx*6.0-15.0)+10.0);
-    float uy = wy*wy*wy*(wy*(wy*6.0-15.0)+10.0);
-    float a = hash1(px,py);
-    float b = hash1(px+1.0,py);
-    float c = hash1(px,py+1.0);
-    float d = hash1(px+1.0,py+1.0);
-    return (a + (b-a)*ux + (c-a)*uy + (a - b - c + d)*ux*uy)-.5;
-}
-
-
-uint8_t pnoise2d(double x, double y, double persistence, int octaves, int seed) {
-   float tiles[4] = {0.,0.,0.,0.};
-   double frequency = 1.0;
-   double amplitude = 1.0;
-   int i = 0;
-   uint8_t pack=0;
-
-   
-    for(i = 0; i < octaves; i++) {
-       double yfreq = y*frequency;
-
-       tiles[0] += noise( x    * frequency, yfreq) * amplitude;
-       tiles[1] += noise((x+1) * frequency, yfreq) * amplitude;
-       tiles[2] += noise((x+2) * frequency, yfreq) * amplitude;
-       tiles[3] += noise((x+3) * frequency, yfreq) * amplitude;
-       frequency *= 2;
-       amplitude *= persistence;
-    }
-    for(i=0;i<4;i++)pack|=(tiles[i]>0.4?3:(tiles[i]>-0.2?2:(tiles[i]>-0.25)?1:0))<<(6-2*i);
-    return pack;
-
-}
+#include "noise.c"
+#include "string.h"
 
 typedef struct{
-    int16_t x;
-    int16_t y;
+    // coordinates are absolute
+    double x;
+    double y; 
     int health;
 } Player;
 
@@ -66,23 +17,24 @@ typedef struct {
     uint8_t tiles[64]; // 16x16
 } Tile_chunk;
 
-
 typedef struct {
     Tile_chunk** chunks;     // 13x13 -6 to 6
     Color* colour_buf;
-    int16_t width;          // Width of the chunk grid
-    int16_t height;         // Height of the chunk grid
+    int32_t offset_x;       // absolute coordinates of "centre"
+    int32_t offset_y;
+    uint8_t width;          // Width of the chunk grid
+    uint8_t height;         // Height of the chunk grid
 } Chunk_manager;
 
 
 Tile_chunk* create_chunk(int16_t x,int16_t y){
     Tile_chunk* new_tile= malloc(sizeof(Tile_chunk));
-    int a=0;
-    for(int i=0;i<16;i++)
-        for(int j=0;j<4;j++){
-            double l = (double)(x + j*4);
-            double t = (double)(y + i);
-            new_tile->tiles[a++] = pnoise2d(l,t,0.4,8,8);
+    int a=0,local_x,local_y;
+    for(local_y=0;local_y<16;local_y++)
+        for(local_x=0;local_x<16;local_x+=4){
+            double l = (double)(x + local_x);
+            double t = (double)(y + local_y);
+            new_tile->tiles[a++] = pnoise2d(l,t);
     }
     return new_tile;
 }
@@ -93,34 +45,30 @@ void refresh_map(Chunk_manager* cm){
     int tile_index;
     for(int chunk_y = 0;chunk_y < cm->height;chunk_y++){
         for(int chunk_x=0;chunk_x < cm->width;chunk_x++){
-            Tile_chunk* chunk = &(cm->chunks[chunk_y][chunk_x]);
+            Tile_chunk chunk = cm->chunks[chunk_y][chunk_x];
             int chunk_base = chunk_y*cm->width*tiles_per_chunk + chunk_x*16;
             tile_index=0;
             for(int y=0;y<16;y++){
-                for(int x=0;x<16;x+=4){
-                    uint8_t mini_tile = chunk->tiles[tile_index++];
-                    int buf_index = chunk_base + y*16*cm->width + x;
-                    cm->colour_buf[buf_index]=colours[(mini_tile>>6)&0x03];
-                    cm->colour_buf[buf_index+1]=colours[(mini_tile>>4)&0x03];
-                    cm->colour_buf[buf_index+2]=colours[(mini_tile>>2)&0x03];
-                    cm->colour_buf[buf_index+3]=colours[mini_tile&0x03];
-
+                int buf_index = chunk_base + y*16*cm->width;
+                for(int x=0;x<4;x++){
+                    uint8_t mini_tile = chunk.tiles[tile_index++];
+                    cm->colour_buf[buf_index++]=colours[(mini_tile>>6)&0x03];
+                    cm->colour_buf[buf_index++]=colours[(mini_tile>>4)&0x03];
+                    cm->colour_buf[buf_index++]=colours[(mini_tile>>2)&0x03];
+                    cm->colour_buf[buf_index++]=colours[mini_tile&0x03];
                 }
-
             }
-
         }
-
     }
-    printf("%i",tile_index);
 }
-
 
 
 Chunk_manager* create_chunk_manager(int16_t width, int16_t height) {
     Chunk_manager* cm = malloc(sizeof(Chunk_manager));
     cm->width = width;
     cm->height = height;
+    cm->offset_x = 0;
+    cm->offset_y = 0;
     
     // Allocate array of pointers
     cm->colour_buf = malloc(width*height*32*32 * sizeof(Color));
@@ -132,69 +80,52 @@ Chunk_manager* create_chunk_manager(int16_t width, int16_t height) {
     return cm;
 }
 
-
-void add_chunk(Chunk_manager* cm, int16_t x, int16_t y) {
+void add_chunk(Chunk_manager* cm, int index_x, int index_y) {
     // Check if position is within bounds
-    if(x < 0 || x >= cm->width || y < 0 || y >= cm->height) {
-        return;
-    }
-    cm->chunks[y][x] = *(create_chunk(x*16,y*16));
+    int abs_x = cm->offset_x + 16*(index_x - (cm->width-1)/2);
+    int abs_y = cm->offset_y + 16*(index_y - (cm->height-1)/2);
+    cm->chunks[index_y][index_x] = *(create_chunk(abs_x,abs_y));
 
 }
+ 
+void update_chunks(Player* player, Chunk_manager* cm){
 
-void scroll_right(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
-    for(int x = cm->width - 1; x > 0; x--) {
-        for(int y = 0; y < cm->height; y++) {
-            cm->chunks[x][y] = cm->chunks[x - 1][y];
-        }
-    }
-    int16_t top = player->y & 0xfff0 - 6*16;
-    int16_t left = player->x & 0xfff0 - 6*16;
-    for(int y = 0;y<cm->height;y++){
-        add_chunk(cm,left,top + y);
-    }
-}
+    int32_t player_chunk_x = ((int32_t)player->x) & 0xfffffff0;
+    int32_t player_chunk_y = ((int32_t)player->y) & 0xfffffff0;
 
-void scroll_left(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
-    for(int x = 1; x<cm->width;x++) {
-        for(int y = 0; y<cm->height;y++) {
-            cm->chunks[x-1][y] = cm->chunks[x][y];
-        }
-    }
-    int16_t top = player->y & 0xfff0 - 6*16;
-    int16_t left = player->x & 0xfff0 + 6*16;
-    for(int y = 0;y<cm->height;y++){
-        add_chunk(cm,left,top + y);
-    }
-    refresh_map(cm);
-}
 
-void scroll_up(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
-    for(int x = 0; x<cm->width;x++) {
-        for(int y = 0; y<cm->height-1;y++) {
-            cm->chunks[x][y] = cm->chunks[x][y+1];
-        }
-    }
-    int16_t top = player->y & 0xfff0 + 6*16;
-    int16_t left = player->x & 0xfff0 - 6*16;
-    for(int x = 0;x<cm->width;x++){
-        add_chunk(cm,left+x,top);
-    }
-    refresh_map(cm);
-}
+    // get new centre chunk coords
+    // for now assume there is an odd number of chunks so this is easy
+    int32_t local_x = (int32_t)(player->x) - player_chunk_x;
+    int32_t local_y = (int32_t)(player->y) - player_chunk_y;
+    if (cm->offset_x == player_chunk_x && cm->offset_y == player_chunk_y)return;
+    
+    int offset_x = (player_chunk_x - cm->offset_x) / 16;
+    int offset_y = (player_chunk_y - cm->offset_y) / 16;
 
-void scroll_down(Chunk_manager* cm, Player* player) { // map moves right, leaving space on the left
-    for(int x = 0; x<cm->width;x++) {
-        for(int y = 1; y<cm->height;y++) {
-            cm->chunks[x][y-1] = cm->chunks[x][y];
+    cm->offset_x = player_chunk_x;
+    cm->offset_y = player_chunk_y;
+
+    Tile_chunk** temp_chunks = malloc(cm->height * sizeof(Tile_chunk*));
+    for(int i = 0; i < cm->height; i++) {
+        temp_chunks[i] = malloc(cm->width * sizeof(Tile_chunk));
+        memcpy(temp_chunks[i], cm->chunks[i], cm->width * sizeof(Tile_chunk));
+    }
+
+    for(int i=0;i<cm->height;i++){
+        for(int j = 0;j<cm->width;j++){
+            int index_y = i + offset_y;
+            int index_x = j + offset_x;
+            if (index_y < 0 || index_y >= cm->height){add_chunk(cm,j,i);continue;}
+            if (index_x < 0 || index_y >= cm->width){add_chunk(cm,j,i);continue;}
+            cm->chunks[i][j] = temp_chunks[index_y][index_x]; 
         }
     }
 
-    int16_t top = player->y & 0xfff0 - 6*16;
-    int16_t left = player->x & 0xfff0 - 6*16;
-    for(int x = 0;x<cm->width;x++){
-        add_chunk(cm,left+x,top);
+    for(int i = 0; i < cm->height; i++) {
+        free(temp_chunks[i]);
     }
+    free(temp_chunks);
     refresh_map(cm);
 }
 
