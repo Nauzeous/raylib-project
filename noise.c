@@ -1,5 +1,4 @@
-#include <stdint.h>
-#include <math.h>
+#include "game.h"
 
 #define PERSISTENCE 0.5
 #define OCTAVES 8
@@ -17,8 +16,8 @@ float hash1(float px, float py ){
 }
 
 float noise(float x, float y ){
-    x/=50.0f;
-    y/=50.0f;
+    x/=100.0f;
+    y/=100.0f;
     float px = floor(x);
     float py = floor(y);
     float wx = fract(x);
@@ -41,7 +40,6 @@ uint8_t pnoise2d(double x, double y) {
    uint8_t pack=0; 
     for(i = 0; i < OCTAVES; i++) {
        double yfreq = y*frequency;
-
        tiles[0] += noise( x    * frequency, yfreq) * amplitude;
        tiles[1] += noise((x+1) * frequency, yfreq) * amplitude;
        tiles[2] += noise((x+2) * frequency, yfreq) * amplitude;
@@ -49,7 +47,13 @@ uint8_t pnoise2d(double x, double y) {
        frequency *= 2;
        amplitude *= PERSISTENCE;
     }
-    for(i=0;i<4;i++)pack|=(tiles[i]>0.4?3:(tiles[i]>-0.2?2:(tiles[i]>-0.25)?1:0))<<(6-2*i);
+    for(i=0;i<4;i++)
+        pack|=(tiles[i]>0.4
+            ?3
+            :(tiles[i]>-0.2
+                ?2
+                :(tiles[i]>-0.25)
+                    ?1
+                    :0))<<(6-2*i);
     return pack;
-
 }

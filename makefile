@@ -5,7 +5,7 @@ CFLAGS = -Wall -Wextra -O3
 LIBS = -lm -lraylib 
 
 # Source files (add more .c files here if you have them)
-SRCS = main.c
+SRCS = main.c terraingen.c enemies.c quadtree.c noise.c
 OBJS = $(SRCS:.c=.o)
 
 # Output executable name
