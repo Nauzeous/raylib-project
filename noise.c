@@ -9,10 +9,59 @@ float fract(float n){
 }
 
 float hash1(float px, float py ){
-    px = 50.*fract( px*0.3183099 );
-    py = 50.*fract( py*0.3183099 );
-    
+    px = 50.0f*fract( px*0.3183099f );
+    py = 50.0f*fract( py*0.3183099f );
     return fract(px*py*(px+py));
+}
+
+
+Vector2* closest_enemies(Vector2* relative_positions, int size){
+    // use an insertion sort to sort two lists by one of them as a key
+    // must pass in the array of relative positions to the player
+    double dist[size];
+    for(int i = 0;i<size;i++){
+        Vector2 rp = relative_positions[i];
+        dist[i] = rp.x*rp.x+rp.y*rp.y;
+    }
+    for(int i=0;i<size;i++){
+        int j = i;
+        double current = dist[i];
+        while(j>0 && dist[j-1]>current){
+            dist[j]=dist[j-1];
+            relative_positions[j]=relative_positions[j-1];
+            j--;
+        }
+        dist[j]=current;
+        relative_positions[j]=relative_positions[i];
+    }
+    return relative_positions;
+}
+
+
+void scale_vec(Vector2* in,float scale){
+    if (!(in->x || in->y))return;
+    float len = scale/sqrt(in->x*in->x+in->y*in->y);
+    in->x *= len;
+    in->y *= len;
+}
+
+void vec2_rotate(Vector2* a,float angle){ // angle in radians
+    float c = cos(angle),s=sin(angle);
+    Vector2 temp = *a;
+    a->x = temp.x * c - s * temp.y;
+    a->y = temp.x * s + c * temp.y;
+}
+
+Vector2 vec2_sub(Vector2 a, Vector2 b){ // a - b
+    return (Vector2){a.x-b.x,a.y-b.y};
+}
+
+Vector2 vec2_add(Vector2 a, Vector2 b){ 
+    return (Vector2){a.x+b.x,a.y+b.y};
+}
+
+Vector2 vec2_mult(Vector2 a, float b){ 
+    return (Vector2){a.x*b,a.y*b};
 }
 
 float noise(float x, float y ){
@@ -32,7 +81,7 @@ float noise(float x, float y ){
 }
 
 
-uint8_t pnoise2d(double x, double y) {
+uint8_t pnoise2d(double x, double y){
    float tiles[4] = {0.,0.,0.,0.};
    double frequency = 1.0;
    double amplitude = 1.0;

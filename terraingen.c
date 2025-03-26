@@ -25,7 +25,7 @@ void refresh_map(Chunk_manager* cm,Texture2D* tex){
 }
 
 
-Chunk_manager* create_chunk_manager(int16_t width, int16_t height) {
+Chunk_manager* create_chunk_manager(uint8_t width, uint8_t height) {
     Chunk_manager* cm = malloc(sizeof(Chunk_manager));
     cm->width = width;
     cm->height = height;
@@ -61,14 +61,10 @@ void add_chunk(Chunk_manager* cm, int index_x, int index_y) {
     cm->chunks[index_y][index_x] = create_chunk(abs_x,abs_y);
 }
  
-void update_chunks(Player* player, Chunk_manager* cm){
+void update_chunks(Player* player, Chunk_manager* cm, Texture2D* map_tex){
 
-    int32_t player_chunk_x = ((int32_t)player->x) & 0xfffffff0;
-    int32_t player_chunk_y = ((int32_t)player->y) & 0xfffffff0;
-    // get new centre chunk coords
-    // for now assume there is an odd number of chunks so this is easy
-    int32_t local_x = ((int32_t)player->x) & 0x0000000f;
-    int32_t local_y = ((int32_t)player->y) & 0x0000000f;
+    int32_t player_chunk_x = ((int32_t)player->position.x) & 0xfffffff0;
+    int32_t player_chunk_y = ((int32_t)player->position.y) & 0xfffffff0;
 
     // dont need to update if the players chunk hasnt changed
     if (cm->offset.x == player_chunk_x && cm->offset.y == player_chunk_y)return;
@@ -98,6 +94,7 @@ void update_chunks(Player* player, Chunk_manager* cm){
         free(temp_chunks[i]);
     }
     free(temp_chunks);
+    refresh_map(cm,map_tex);
 }
 
 void init_chunks(Chunk_manager* cm){

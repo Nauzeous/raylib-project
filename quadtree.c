@@ -1,8 +1,9 @@
 #include "game.h"
 
-bool square_contains_point(Vector2 square_centre,Vector2 point,float radius){
-    return (point.x >= square_centre.x - radius && point.x <= square_centre.x + radius) && 
-           (point.y >= square_centre.y - radius && point.y <= square_centre.y + radius);
+bool circle_contains_point(Vector2 centre, Vector2 point, float radius) {
+    float dx = point.x - centre.x;
+    float dy = point.y - centre.y;
+    return (dx * dx + dy * dy) <= (radius * radius);
 }
 
 bool is_square_overlap(Vector2 centre1, Vector2 centre2, float radius1, float radius2) {
@@ -26,15 +27,15 @@ void free_qtree(QTree* tree) {
     }
     
     free(tree->points);
+    free(tree->id);
     free(tree);
 }
 
 void rebuild_tree(QTree* tree,Enemy_manager* em,Chunk_manager* cm){
 	reset_quadtree(tree);
 	for (int i = 0;i<em->count;i++){
-		Vector2 tree_pos = {em->position[i].x - cm->offset.x,
-							em->position[i].y - cm->offset.y};
-		qtree_insert(tree,tree_pos);
+		Vector2 tree_pos = vec2_sub(em->position[i],cm->offset);
+		qtree_insert(tree,tree_pos,i);
 	}
 }
 
@@ -50,23 +51,23 @@ void reset_quadtree(QTree* tree){
 	}
 }
 
-void qtree_insert(QTree* tree, Vector2 pt) {
+void qtree_insert(QTree* tree, Vector2 pt,int id) {
 	if (tree->is_divided){
-		qtree_insert(subtree_decide(tree,pt),pt);
+		qtree_insert(subtree_decide(tree,pt),pt,id);
 		return;
 	}
-
     if (tree->num_points < POINTS_PER_QUAD ) {
         tree->points[tree->num_points] = pt;
+        tree->id[tree->num_points] = id;
         tree->num_points++;
         return;
     }
-
+   // runs if the current quad is full
     subdivide_qtree(tree);
-    // insert into correct subtree
-    for (int i = 0; i < tree->num_points; i++) {
-        qtree_insert(subtree_decide(tree,tree->points[i]),tree->points[i]);
+    for (int i = 0; i < POINTS_PER_QUAD; i++) {
+        qtree_insert(subtree_decide(tree,tree->points[i]),tree->points[i],tree->id[i]);
     }
+    qtree_insert(subtree_decide(tree,pt),pt,id);
 }
 
 void qtree_query(QTree* tree,Vector2 centre,float radius, Enemy_manager* em,int* num_points){
@@ -83,8 +84,8 @@ void qtree_query(QTree* tree,Vector2 centre,float radius, Enemy_manager* em,int*
 
     for (int i = 0; i < tree->num_points; i ++) {
     	if (tree->points[i].x == centre.x && tree->points[i].y == centre.y)continue;
-        if (square_contains_point(tree->centre, tree->points[i],radius)) {
-            em->query_arr[*num_points] = tree->points[i];
+        if (circle_contains_point(centre, tree->points[i],radius)) {
+            em->query_arr[*num_points] = tree->id[i];
             (*num_points)++;
         }
     }
@@ -130,6 +131,7 @@ QTree* create_quad_tree(Vector2 centre, float radius){
 	qtree->centre = centre;
 	qtree->radius = radius;
 	qtree->points = malloc(POINTS_PER_QUAD*sizeof(Vector2));
+	qtree->id = malloc(POINTS_PER_QUAD*sizeof(int));
 	qtree->num_points = 0;
 	qtree->tl=NULL;
 	qtree->tr=NULL;
